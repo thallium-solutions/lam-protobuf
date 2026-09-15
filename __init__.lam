@@ -1,0 +1,10 @@
+# Copyright 2026 Thallium Solutions di Busconi Alessandro.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Public package API. Import with: from @lam/protobuf import Pb
+
+from .protobuf import Pb
+
+func tag() -> str {
+    return "@lam/protobuf@1.0.0"
+}
