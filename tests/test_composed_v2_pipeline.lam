@@ -1,0 +1,163 @@
+# Complex composed scenario: a request context becomes a protobuf event model,
+# whose wire bytes are hex-encoded, encrypted, decrypted, decoded, and inspected
+# through both proto JSON and the core JSON API.
+# expect: PASS 1 context supplies event metadata
+# expect: PASS 2 core JSON metadata encodes
+# expect: PASS 3 marshal Result succeeds
+# expect: PASS 4 model size matches wire
+# expect: PASS 5 bytes round trip preserves wire
+# expect: PASS 6 crypto protects wire payload
+# expect: PASS 7 unmarshal Result succeeds
+# expect: PASS 8 protobuf round trip is equal
+# expect: PASS 9 nested model data survives
+# expect: PASS 10 proto JSON composes with core JSON
+# expect: PASS 11 clone model starts equal
+# expect: PASS 12 clone mutation is independent
+# expect: PASS 13 text model round trip succeeds
+# expect: PASS 14 invalid wire is a typed error
+# expect: PASS 15 invalid model is a typed error
+# expect: PASS 16 propagation preserves codec error
+# expect: PASS 17 codec error keeps diagnostic
+# expect: 17 passed, 0 failed, 17 total
+
+from @lam/protobuf import Pb
+from lambytes import Bytes
+from lamcontext import Context
+from lamcrypto import Crypto
+from lamerrors import Result, Error
+from lamjson import Json
+from lamtest import Test
+
+go! {
+    import "google.golang.org/protobuf/types/known/structpb"
+}
+
+func encryptionKey() -> list[int] {
+    return [31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16,
+            15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+}
+
+func encodeMetadata(data: dict[str, any]) -> Result[str] {
+    value: json = Json.fromValue(data)?
+    return Json.encode(value)
+}
+
+func propagatedDecode(data: str) -> Result[bool] {
+    target: any = None
+    go! {
+        target = &structpb.Struct{}
+    }
+    decoded: bool = Pb.unmarshal(data, target)?
+    return Result.Ok(decoded)
+}
+
+func main() {
+    ctx: Context = Context.simple()
+    ctx.set("tenant", "acme")
+    ctx.set("request_id", "req-9000")
+    Test.assertTrue(ctx.get("tenant") == "acme" and ctx.get("request_id") == "req-9000", "1 context supplies event metadata")
+
+    metadata: dict[str, any] = {}
+    metadata["tenant"] = ctx.get("tenant")
+    metadata["request_id"] = ctx.get("request_id")
+    metadataTextRes: Result[str] = encodeMetadata(metadata)
+    Test.assertTrue(metadataTextRes.ok() and Json.isValid(str(metadataTextRes.value)), "2 core JSON metadata encodes")
+
+    do {
+        metadataText: str = metadataTextRes?
+        tenant: str = str(ctx.get("tenant"))
+        requestId: str = str(ctx.get("request_id"))
+        original: any = None
+        go! {
+            original, _ = structpb.NewStruct(map[string]interface{}{
+                "kind":       "invoice.created",
+                "tenant":     tenant,
+                "request_id": requestId,
+                "attempt":    1,
+                "metadata":   metadataText,
+                "lines": []interface{}{
+                    map[string]interface{}{"sku": "A-1", "quantity": 2},
+                    map[string]interface{}{"sku": "B-2", "quantity": 1},
+                },
+            })
+        }
+
+        wireRes: Result[str] = Pb.marshal(original)
+        Test.assertTrue(wireRes.ok(), "3 marshal Result succeeds")
+        wire: str = wireRes?
+        Test.assertTrue(len(wire) > 20 and Pb.size(original) == len(wire), "4 model size matches wire")
+
+        wireHex: str = Bytes.hexEncode(wire)
+        restoredWire: str = Bytes.hexDecode(wireHex)?
+        Test.assertTrue(restoredWire == wire and len(wireHex) == len(wire) * 2, "5 bytes round trip preserves wire")
+
+        envelopeRes: Result[str] = Crypto.encrypt(wireHex, encryptionKey(), "protobuf-event")
+        envelope: str = envelopeRes?
+        decryptedHex: str = Crypto.decrypt(envelope, encryptionKey(), "protobuf-event")?
+        Test.assertTrue(envelopeRes.ok() and decryptedHex == wireHex, "6 crypto protects wire payload")
+
+        decodedWire: str = Bytes.hexDecode(decryptedHex)?
+        decoded: any = None
+        go! {
+            decoded = &structpb.Struct{}
+        }
+        decodedRes: Result[bool] = Pb.unmarshal(decodedWire, decoded)
+        decodedOk: bool = decodedRes?
+        Test.assertTrue(decodedRes.ok() and decodedOk, "7 unmarshal Result succeeds")
+        Test.assertTrue(Pb.equal(original, decoded), "8 protobuf round trip is equal")
+
+        nestedOk: bool = false
+        go! {
+            decodedStruct := decoded.(*structpb.Struct)
+            lines := decodedStruct.Fields["lines"].GetListValue().Values
+            nestedOk = decodedStruct.Fields["tenant"].GetStringValue() == "acme" &&
+                len(lines) == 2 &&
+                lines[0].GetStructValue().Fields["quantity"].GetNumberValue() == 2
+        }
+        Test.assertTrue(nestedOk, "9 nested model data survives")
+
+        protoJson: str = Pb.toJson(decoded)
+        jsonValue: json = Json.decode(protoJson)?
+        jsonObject: dict[str, any] = Json.toDict(jsonValue)?
+        Test.assertTrue(Json.kind(jsonValue) == "object" and jsonObject["kind"] == "invoice.created", "10 proto JSON composes with core JSON")
+
+        cloned: any = Pb.clone(decoded)
+        Test.assertTrue(Pb.equal(decoded, cloned), "11 clone model starts equal")
+        go! {
+            c := cloned.(*structpb.Struct)
+            c.Fields["attempt"] = structpb.NewNumberValue(2)
+        }
+        originalAttemptOne: bool = false
+        go! {
+            originalStruct := decoded.(*structpb.Struct)
+            originalAttemptOne = originalStruct.Fields["attempt"].GetNumberValue() == 1
+        }
+        Test.assertTrue(not Pb.equal(decoded, cloned) and originalAttemptOne, "12 clone mutation is independent")
+
+        text: str = Pb.toText(decoded)
+        textDecoded: any = None
+        go! {
+            textDecoded = &structpb.Struct{}
+        }
+        Test.assertTrue(Pb.fromText(text, textDecoded) and Pb.equal(decoded, textDecoded), "13 text model round trip succeeds")
+
+        invalidWire: str = Bytes.fromBytes([255, 255, 255])
+        invalidRes: Result[bool] = Pb.unmarshal(invalidWire, textDecoded)
+        invalidError: Error = invalidRes.error
+        Test.assertTrue(not invalidRes.ok() and invalidError.kind == "PbError", "14 invalid wire is a typed error")
+
+        invalidModel: Result[str] = Pb.marshal("not a protobuf model")
+        invalidModelError: Error = invalidModel.error
+        Test.assertTrue(not invalidModel.ok() and invalidModelError.kind == "PbError", "15 invalid model is a typed error")
+
+        propagated: Result[bool] = propagatedDecode(invalidWire)
+        propagatedError: Error = propagated.error
+        Test.assertTrue(not propagated.ok() and propagatedError.kind == "PbError", "16 propagation preserves codec error")
+
+        Test.assertTrue(str(invalidError).startsWith("PbError:"), "17 codec error keeps diagnostic")
+    } catch outer {
+        print(f"unexpected composed protobuf error: {outer}")
+    }
+
+    Test.summary()
+}

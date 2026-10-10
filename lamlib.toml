@@ -1,6 +1,6 @@
 [library]
 name = "@lam/protobuf"
-version = "1.0.0"
+version = "2.0.0"
 description = "Protocol Buffers wire-format codec for Lammergeier"
 license = "Apache-2.0"
 authors = ["Lammergeier contributors"]
@@ -8,7 +8,7 @@ repository = "https://github.com/thallium-solutions/lam-protobuf"
 homepage = "https://github.com/thallium-solutions/lam-protobuf"
 
 [compatibility]
-lamc = "^1.16"
+lamc = "^1.18"
 
 [go-deps]
 "google.golang.org/protobuf" = "v1.36.11"

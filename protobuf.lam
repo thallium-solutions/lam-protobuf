@@ -14,6 +14,7 @@
 # Example::
 #
 #     from @lam/protobuf import Pb
+#     from lamerrors import Result
 #
 #     go! {
 #         import myproto "github.com/me/app/proto/v1"
@@ -22,10 +23,10 @@
 #     func main() {
 #         u: any = None
 #         go! { u = &myproto.User{Name: "alice", Age: 30} }
-#         wire: str = Pb.marshal(u)
+#         wire: str = Pb.marshal(u)?
 #         decoded: any = None
 #         go! { decoded = &myproto.User{} }
-#         Pb.unmarshal(wire, decoded)
+#         decodedOk: bool = Pb.unmarshal(wire, decoded)?
 #         go! {
 #             d := decoded.(*myproto.User)
 #             fmt.Printf("%s aged %d\n", d.Name, d.Age)
@@ -56,25 +57,12 @@ go! {
 class Pb {
     # Static class. Not instantiable.
 
-    static func marshal(msg: any) -> str {
+    static func marshal(msg: any) -> Result[str] {
         # Serialise ``msg`` (a ``*MyProtoType``) to the binary wire
         # format. Returns the bytes as a Go ``string`` so they survive
         # Lam's dict / channel typing intact (use ``[]byte(s)`` on the
-        # Go side if you need a slice). Returns ``""`` on failure;
-        # prefer ``tryMarshal`` if the distinction between empty and
-        # error matters.
-        out: str = ""
-        go! {
-            if m, ok := lamPbAsMessage(msg); ok {
-                if b, err := proto.Marshal(m); err == nil {
-                    out = string(b)
-                }
-            }
-        }
-        return out
-    }
-
-    static func tryMarshal(msg: any) -> Result {
+        # Go side if you need a slice). Invalid values and codec failures
+        # are returned as ``PbError``.
         go! {
             m, ok := lamPbAsMessage(msg)
             if !ok {
@@ -88,22 +76,10 @@ class Pb {
         }
     }
 
-    static func unmarshal(data: str, msg: any) -> bool {
+    static func unmarshal(data: str, msg: any) -> Result[bool] {
         # Decode binary wire bytes into ``msg`` (must be a freshly
-        # allocated ``*MyProtoType``). Returns ``true`` on success.
-        # ``msg`` is mutated in place.
-        ok: bool = false
-        go! {
-            if m, mok := lamPbAsMessage(msg); mok {
-                if err := proto.Unmarshal([]byte(data), m); err == nil {
-                    ok = true
-                }
-            }
-        }
-        return ok
-    }
-
-    static func tryUnmarshal(data: str, msg: any) -> Result {
+        # allocated ``*MyProtoType``). ``msg`` is mutated in place;
+        # invalid values and codec failures are returned as ``PbError``.
         go! {
             m, ok := lamPbAsMessage(msg)
             if !ok {

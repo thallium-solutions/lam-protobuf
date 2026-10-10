@@ -6,5 +6,5 @@
 from .protobuf import Pb
 
 func tag() -> str {
-    return "@lam/protobuf@1.0.0"
+    return "@lam/protobuf@2.0.0"
 }

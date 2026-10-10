@@ -2,6 +2,21 @@
 
 All notable changes to `@lam/protobuf` are documented here.
 
+## 2.0.0 - 2026-09-30
+
+### Changed
+
+- **Breaking:** Replaced the `marshal`/`tryMarshal` and
+  `unmarshal`/`tryUnmarshal` twins with single `marshal -> Result[str]` and
+  `unmarshal -> Result[bool]` APIs.
+- Raised the minimum compatible Lammergeier compiler to 1.18 (`^1.18`).
+- Updated package examples and consumer tests for typed `Result` handling.
+
+### Testing
+
+- Added an installed-package protobuf pipeline composing context metadata, core
+  JSON, wire bytes, encryption, cloning, text conversion, and typed failures.
+
 ## 1.0.0 - 2026-09-13
 
 ### Added
