@@ -4,7 +4,3 @@
 # Public package API. Import with: from @lam/protobuf import Pb
 
 from .protobuf import Pb
-
-func tag() -> str {
-    return "@lam/protobuf@2.0.0"
-}

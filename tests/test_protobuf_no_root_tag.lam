@@ -1,0 +1,19 @@
+# Regression: the package no longer declares a root ``tag()`` (name and
+# version live in lamlib.toml), so an application or another package may
+# declare its own top-level ``tag`` and still link with this package.
+#
+# expect: tag=application
+# expect: empty-marshal=true
+
+from lamerrors import Result
+from @lam/protobuf import Pb
+
+func tag() -> str {
+    return "application"
+}
+
+func main() {
+    print("tag=" + tag())
+    encoded: Result[str] = Pb.marshal(None)
+    print(f"empty-marshal={not encoded.ok()}")
+}
