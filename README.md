@@ -22,7 +22,7 @@ through Lammergeier's `any`/`go!` boundary.
 Install directly from Git:
 
 ```bash
-lamc install https://github.com/thallium-solutions/lam-protobuf.git@v2.0.0
+lamc install https://github.com/thallium-solutions/lam-protobuf.git@3.0.0
 ```
 
 Install from a local checkout:
