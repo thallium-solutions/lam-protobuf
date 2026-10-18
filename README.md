@@ -13,7 +13,7 @@ through Lammergeier's `any`/`go!` boundary.
 
 ## Requirements
 
-- `lamc` 1.18.0 or newer within the compatible 1.x range (`^1.18`).
+- `lamc` 1.18.0 or newer including 2.x (`>=1.18, <3`).
 - Go and `protoc` for generating application message types.
 - The package pins `google.golang.org/protobuf` to `v1.36.11`.
 
