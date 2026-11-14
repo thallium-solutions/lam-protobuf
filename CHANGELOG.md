@@ -2,6 +2,25 @@
 
 All notable changes to `@lam/protobuf` are documented here.
 
+## [3.0.4] - 2026-11-14
+
+### Fixed
+
+- Wire sizes are measured in bytes: the tests compared `Pb.size(msg)` and
+  the hex length with `len(wire)`, which counts the characters of the `str`
+  from lamc 4.14 on (strings are sequences of characters), so a wire whose
+  bytes form multi-byte UTF-8 sequences looked shorter. They use
+  `len(bytes(wire))`, the byte count with lamc 4.13 and 4.14; the README and
+  the `marshal` documentation say so. No API change (`marshal` still returns
+  the wire as a `str`).
+
+### Testing
+
+- `test_wire_bytes`: non-ASCII text fields and 50 random 64-byte binary
+  fields (`Pb.size` equals `len(bytes(wire))`, two hex digits per byte,
+  round trip); it fails with lamc 4.14 when the wire is measured with
+  `len(wire)`.
+
 ## [3.0.3] - 2026-11-03
 
 ### Changed

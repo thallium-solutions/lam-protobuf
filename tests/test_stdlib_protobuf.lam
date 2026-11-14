@@ -33,7 +33,7 @@ func main() {
 
     do {
         wire: str = Pb.marshal(msg)?
-        n: int = len(wire)
+        n: int = len(bytes(wire))
         print(f"wire bytes: {n}")
 
         decoded: any = None

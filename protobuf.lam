@@ -61,8 +61,10 @@ class Pb {
         # Serialise ``msg`` (a ``*MyProtoType``) to the binary wire
         # format. Returns the bytes as a Go ``string`` so they survive
         # Lam's dict / channel typing intact (use ``[]byte(s)`` on the
-        # Go side if you need a slice). Invalid values and codec failures
-        # are returned as ``PbError``.
+        # Go side if you need a slice). The wire size is
+        # ``len(bytes(wire))``: ``len(wire)`` counts characters from lamc
+        # 4.14 on. Invalid values and codec failures are returned as
+        # ``PbError``.
         go! {
             m, ok := lamPbAsMessage(msg)
             if !ok {

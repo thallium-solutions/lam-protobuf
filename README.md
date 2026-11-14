@@ -22,7 +22,7 @@ through Lammergeier's `any`/`go!` boundary.
 Install directly from Git:
 
 ```bash
-lamc install https://github.com/thallium-solutions/lam-protobuf.git@3.0.0
+lamc install https://github.com/thallium-solutions/lam-protobuf.git@3.0.4
 ```
 
 Install from a local checkout:
@@ -34,7 +34,7 @@ lamc install /path/to/lam-protobuf
 Install the registry release:
 
 ```bash
-lamc install '@lam/protobuf@2.0.0'
+lamc install '@lam/protobuf@3.0.4'
 ```
 
 All installation methods use the manifest's canonical package name, so the
@@ -94,7 +94,10 @@ func main() {
 
 Binary wire bytes are represented as a Lammergeier `str`. This preserves the
 bytes across Lammergeier dictionaries and channels; use `[]byte(wire)` inside a
-`go!` block when a Go byte slice is required.
+`go!` block when a Go byte slice is required. Measure the wire with
+`len(bytes(wire))` (the byte count, equal to `Pb.size(msg)`): from lamc 4.14 on
+`len(wire)` counts the characters of the `str`, and wire bytes often form
+multi-byte UTF-8 sequences (non-ASCII text fields, binary fields).
 
 ## Result-aware encoding and decoding
 

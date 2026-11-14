@@ -85,11 +85,11 @@ func main() {
         wireRes: Result[str] = Pb.marshal(original)
         Test.assertTrue(wireRes.ok(), "3 marshal Result succeeds")
         wire: str = wireRes?
-        Test.assertTrue(len(wire) > 20 and Pb.size(original) == len(wire), "4 model size matches wire")
+        Test.assertTrue(len(bytes(wire)) > 20 and Pb.size(original) == len(bytes(wire)), "4 model size matches wire")
 
         wireHex: str = Bytes.hexEncode(wire)
         restoredWire: str = Bytes.hexDecode(wireHex)?
-        Test.assertTrue(restoredWire == wire and len(wireHex) == len(wire) * 2, "5 bytes round trip preserves wire")
+        Test.assertTrue(restoredWire == wire and len(wireHex) == len(bytes(wire)) * 2, "5 bytes round trip preserves wire")
 
         envelopeRes: Result[str] = Crypto.encrypt(wireHex, encryptionKey(), "protobuf-event")
         envelope: str = envelopeRes?

@@ -1,0 +1,79 @@
+# Wire bytes are binary data carried in a str: their size is
+# len(bytes(wire)), the byte count with every lamc (len(str) counts
+# characters from lamc 4.14 on). Non-ASCII text fields and random binary
+# fields make the wire contain multi-byte UTF-8 sequences.
+#
+# expect: text size matches wire bytes: true
+# expect: text hex is two digits per byte: true
+# expect: text round trip: true
+# expect: random size matches wire bytes: 50/50
+# expect: random hex is two digits per byte: 50/50
+# expect: random round trip: 50/50
+# expect: utf-8 bytes field size: true
+
+from @lam/protobuf import Pb
+from lambytes import Bytes
+from lamcrypto import Crypto
+
+go! {
+    import "google.golang.org/protobuf/types/known/wrapperspb"
+}
+
+func sizeMatches(msg: any) -> bool {
+    wire: str = Pb.marshal(msg).unwrap()
+    return Pb.size(msg) == len(bytes(wire))
+}
+
+func hexMatches(msg: any) -> bool {
+    wire: str = Pb.marshal(msg).unwrap()
+    return len(Bytes.hexEncode(wire)) == 2 * len(bytes(wire))
+}
+
+func main() {
+    text: any = None
+    go! {
+        text = wrapperspb.String("été — 日本語 €")
+    }
+    print(f"text size matches wire bytes: {sizeMatches(text)}")
+    print(f"text hex is two digits per byte: {hexMatches(text)}")
+    textWire: str = Pb.marshal(text).unwrap()
+    textBack: any = None
+    go! {
+        textBack = &wrapperspb.StringValue{}
+    }
+    print(f"text round trip: {Pb.unmarshal(textWire, textBack).unwrap() and Pb.equal(text, textBack)}")
+
+    sizes: int = 0
+    hexes: int = 0
+    trips: int = 0
+    for i in range(50) {
+        raw: str = Bytes.hexDecode(Crypto.randomHex(64).unwrap()).unwrap()
+        msg: any = None
+        back: any = None
+        go! {
+            msg = wrapperspb.Bytes([]byte(raw))
+            back = &wrapperspb.BytesValue{}
+        }
+        if sizeMatches(msg) {
+            sizes += 1
+        }
+        if hexMatches(msg) {
+            hexes += 1
+        }
+        wire: str = Pb.marshal(msg).unwrap()
+        if Pb.unmarshal(wire, back).unwrap() and Pb.equal(msg, back) {
+            trips += 1
+        }
+    }
+    print(f"random size matches wire bytes: {sizes}/50")
+    print(f"random hex is two digits per byte: {hexes}/50")
+    print(f"random round trip: {trips}/50")
+
+    # 16 x "é": 32 bytes, 16 characters, plus the 2-byte field header.
+    utf8: any = None
+    go! {
+        utf8 = wrapperspb.Bytes([]byte("éééééééééééééééé"))
+    }
+    utf8Wire: str = Pb.marshal(utf8).unwrap()
+    print(f"utf-8 bytes field size: {len(bytes(utf8Wire)) == 34 and Pb.size(utf8) == 34}")
+}
