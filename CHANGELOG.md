@@ -2,6 +2,23 @@
 
 All notable changes to `@lam/protobuf` are documented here.
 
+## [3.0.5] - 2026-11-14
+
+### Tests
+
+- `tests/test_pb_edge_cases.lam`: every `Pb` method given a value that is not
+  a message or `None`; empty messages; truncated wire data and invalid UTF-8
+  in a string field (`PbError`, while a bytes field accepts the bytes); a
+  4 MiB bytes field; proto-JSON of int64, bytes, NaN/infinities, Duration,
+  Timestamp and non-ASCII text, malformed JSON and unknown fields refused;
+  text-format round trips; `equal` across types, unset vs. default and
+  changed clones.
+- `tests/test_pb_event_log_composed.lam`: an `EventLog` class encoding
+  `structpb` events in 40 concurrent async tasks, replaying them with `?`,
+  filtering with comprehensions, recovering from a corrupted record with
+  `do/catch`, wire/JSON/text conversions and byte sizes, clones mutated in
+  tasks.
+
 ## [3.0.4] - 2026-11-14
 
 ### Fixed

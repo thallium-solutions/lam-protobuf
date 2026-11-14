@@ -1,0 +1,195 @@
+# Test: @lam/protobuf error paths and edge cases of every Pb method.
+#
+#   * Values that are not messages: marshal/unmarshal return a `PbError`,
+#     toJson/toText return "", fromJson/fromText false, equal false,
+#     size -1, clone None.
+#   * Empty messages: zero bytes on the wire, and an empty wire decodes.
+#   * Bad wire data: a truncated message and a string field holding invalid
+#     UTF-8 are `PbError`s; a bytes field accepts the same bytes.
+#   * Large values: a 4 MiB bytes field round-trips, `size` is its byte
+#     count.
+#   * proto-JSON: int64 as a string, bytes as base64, NaN and infinities,
+#     Duration and Timestamp forms, non-ASCII text; malformed JSON, unknown
+#     fields and a wrong type are refused.
+#   * Text format: non-ASCII round trip, malformed text refused.
+#   * equal: different types, unset vs. default, a clone after a change.
+#
+# expect: not messages: PbError PbError "" "" false false false -1 true
+# expect: none: PbError PbError
+# expect: empty message: 0 0 ok=true
+# expect: truncated: PbError
+# expect: invalid utf-8 string: PbError bytes-field=true
+# expect: large bytes: true true
+# expect: int64 json: "9007199254740993" back=true
+# expect: bytes json: "AP8Q" back=true
+# expect: float json: "NaN" "Infinity" "-Infinity"
+# expect: duration json: "1.500s" timestamp json: "1970-01-01T00:00:01.500Z"
+# expect: unicode json: true
+# expect: bad json: false false false
+# expect: text: true bad=false
+# expect: equal: types=false unset-vs-empty=true clone-changed=false
+# expect: ok
+
+from @lam/protobuf import Pb
+from lamerrors import Result
+
+go! {
+    import (
+        "math"
+        "strings"
+        "time"
+
+        "google.golang.org/protobuf/types/known/durationpb"
+        "google.golang.org/protobuf/types/known/emptypb"
+        "google.golang.org/protobuf/types/known/structpb"
+        "google.golang.org/protobuf/types/known/timestamppb"
+        "google.golang.org/protobuf/types/known/wrapperspb"
+    )
+}
+
+func kind(r: Result) -> str {
+    if r.ok() {
+        return "ok"
+    }
+    return r.error.kind
+}
+
+class NotAMessage {
+    func init(self) {
+        self.name: str = "x"
+    }
+}
+
+func main() {
+    plain: NotAMessage = NotAMessage()
+    holder: any = None
+    go! {
+        holder = &wrapperspb.StringValue{}
+    }
+    quoted: str = "\"x\""
+    print(f"not messages: {kind(Pb.marshal(plain))} {kind(Pb.unmarshal('', plain))} \"{Pb.toJson(plain)}\" \"{Pb.toText(42)}\" {Pb.fromJson(quoted, plain)} {Pb.fromText('', 'text')} {Pb.equal(plain, plain)} {Pb.size(plain)} {Pb.clone(plain) == None}")
+    nothing: any = None
+    print(f"none: {kind(Pb.marshal(nothing))} {kind(Pb.unmarshal('', nothing))}")
+
+    empty: any = None
+    emptyBack: any = None
+    go! {
+        empty = &emptypb.Empty{}
+        emptyBack = &wrapperspb.StringValue{}
+    }
+    emptyWire: str = Pb.marshal(empty).unwrap()
+    print(f"empty message: {len(bytes(emptyWire))} {Pb.size(empty)} ok={Pb.unmarshal('', emptyBack).unwrap()}")
+
+    long: any = None
+    go! {
+        long = wrapperspb.String(strings.Repeat("ab", 100))
+    }
+    longWire: str = Pb.marshal(long).unwrap()
+    truncated: str = ""
+    go! {
+        truncated = longWire[:50]
+    }
+    print(f"truncated: {kind(Pb.unmarshal(truncated, holder))}")
+
+    invalid: any = None
+    bytesBack: any = None
+    go! {
+        invalid = wrapperspb.Bytes([]byte{0xff, 0xfe, 0x41})
+        bytesBack = &wrapperspb.BytesValue{}
+    }
+    invalidWire: str = Pb.marshal(invalid).unwrap()
+    stringBack: any = None
+    go! {
+        stringBack = &wrapperspb.StringValue{}
+    }
+    print(f"invalid utf-8 string: {kind(Pb.unmarshal(invalidWire, stringBack))} bytes-field={Pb.unmarshal(invalidWire, bytesBack).unwrap() and Pb.equal(invalid, bytesBack)}")
+
+    big: any = None
+    bigBack: any = None
+    go! {
+        raw := make([]byte, 4<<20)
+        for i := range raw {
+            raw[i] = byte(i * 7)
+        }
+        big = wrapperspb.Bytes(raw)
+        bigBack = &wrapperspb.BytesValue{}
+    }
+    bigWire: str = Pb.marshal(big).unwrap()
+    print(f"large bytes: {Pb.size(big) == len(bytes(bigWire)) and Pb.size(big) > 4194304} {Pb.unmarshal(bigWire, bigBack).unwrap() and Pb.equal(big, bigBack)}")
+
+    # ── proto-JSON ──────────────────────────────────────────────
+    i64: any = None
+    i64Back: any = None
+    go! {
+        i64 = wrapperspb.Int64(9007199254740993)
+        i64Back = &wrapperspb.Int64Value{}
+    }
+    i64Json: str = Pb.toJson(i64)
+    print(f"int64 json: {i64Json} back={Pb.fromJson(i64Json, i64Back) and Pb.equal(i64, i64Back)}")
+    bin: any = None
+    binBack: any = None
+    go! {
+        bin = wrapperspb.Bytes([]byte{0x00, 0xff, 0x10})
+        binBack = &wrapperspb.BytesValue{}
+    }
+    binJson: str = Pb.toJson(bin)
+    print(f"bytes json: {binJson} back={Pb.fromJson(binJson, binBack) and Pb.equal(bin, binBack)}")
+    nan: any = None
+    inf: any = None
+    ninf: any = None
+    go! {
+        nan = wrapperspb.Double(math.NaN())
+        inf = wrapperspb.Double(math.Inf(1))
+        ninf = wrapperspb.Double(math.Inf(-1))
+    }
+    print(f"float json: {Pb.toJson(nan)} {Pb.toJson(inf)} {Pb.toJson(ninf)}")
+    duration: any = None
+    stamp: any = None
+    go! {
+        duration = durationpb.New(1500 * time.Millisecond)
+        stamp = timestamppb.New(time.Unix(1, 500000000).UTC())
+    }
+    print(f"duration json: {Pb.toJson(duration)} timestamp json: {Pb.toJson(stamp)}")
+    text: any = None
+    textBack: any = None
+    go! {
+        text = wrapperspb.String("Grüße 🦅 東京")
+        textBack = &wrapperspb.StringValue{}
+    }
+    print(f"unicode json: {Pb.fromJson(Pb.toJson(text), textBack) and Pb.equal(text, textBack)}")
+    structTarget: any = None
+    durationTarget: any = None
+    go! {
+        structTarget = &structpb.Struct{}
+        durationTarget = &durationpb.Duration{}
+    }
+    malformed: str = "{not json"
+    unknownField: str = "{\"seconds\": 1, \"extra\": 2}"
+    print(f"bad json: {Pb.fromJson(malformed, structTarget)} {Pb.fromJson(unknownField, durationTarget)} {Pb.fromJson('42', durationTarget)}")
+
+    # ── Text format ─────────────────────────────────────────────
+    textForm: str = Pb.toText(text)
+    textBack2: any = None
+    go! {
+        textBack2 = &wrapperspb.StringValue{}
+    }
+    print(f"text: {Pb.fromText(textForm, textBack2) and Pb.equal(text, textBack2)} bad={Pb.fromText('value: ', textBack2)}")
+
+    # ── equal ───────────────────────────────────────────────────
+    a: any = None
+    b: any = None
+    unset: any = None
+    defaulted: any = None
+    go! {
+        a = wrapperspb.String("x")
+        b = wrapperspb.Bytes([]byte("x"))
+        unset = &wrapperspb.StringValue{}
+        defaulted = wrapperspb.String("")
+    }
+    copy: any = Pb.clone(a)
+    go! {
+        copy.(*wrapperspb.StringValue).Value = "y"
+    }
+    print(f"equal: types={Pb.equal(a, b)} unset-vs-empty={Pb.equal(unset, defaulted)} clone-changed={Pb.equal(a, copy)}")
+    print("ok")
+}

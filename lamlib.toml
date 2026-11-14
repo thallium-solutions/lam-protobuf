@@ -1,6 +1,6 @@
 [library]
 name = "@lam/protobuf"
-version = "3.0.4"
+version = "3.0.5"
 description = "Protocol Buffers wire-format codec for Lammergeier"
 license = "Apache-2.0"
 authors = ["Lammergeier contributors"]

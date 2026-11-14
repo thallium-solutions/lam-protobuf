@@ -1,0 +1,169 @@
+# Cross-feature: an append-only event log storing protobuf records.
+# An `EventLog` class encodes events (`structpb.Struct` built from Lam
+# dicts) in 40 concurrent async tasks, replays them with `?`, filters them
+# with comprehensions, survives a corrupted record through `do/catch`, and
+# converts records between wire, proto-JSON and text format. Byte sizes
+# are `len(bytes(wire))` and add up to `Pb.size` of every record.
+#
+# expect: encoded concurrently: 40 records
+# expect: sizes add up: true
+# expect: replay: 40 events, tenants=[acme globex initech umbrella]
+# expect: filtered: 10 acme events, amounts=[0 4 8 12 16 20 24 28 32 36]
+# expect: non-ASCII payload survives: Zoë 🦅 東京 (11 characters, 19 bytes)
+# expect: json and text agree: 40/40
+# expect: clones in tasks are independent: true
+# expect: corrupted record: PbError at [7]
+# expect: replay after repair: 40
+# expect: ok
+
+from @lam/protobuf import Pb
+from lamerrors import Result, Error
+
+go! {
+    import "google.golang.org/protobuf/types/known/structpb"
+}
+
+func toStruct(fields: dict[str, any]) -> Result[any] {
+    msg: any = None
+    problem: str = ""
+    go! {
+        if s, err := structpb.NewStruct(fields); err != nil {
+            problem = err.Error()
+        } else {
+            msg = s
+        }
+    }
+    if problem != "" {
+        return Result.Err(Error("EncodeError", problem))
+    }
+    return Result.Ok(msg)
+}
+
+func fromStruct(msg: any) -> dict[str, any] {
+    out: dict[str, any] = {}
+    go! {
+        out = msg.(*structpb.Struct).AsMap()
+    }
+    return out
+}
+
+func emptyStruct() -> any {
+    msg: any = None
+    go! {
+        msg = &structpb.Struct{}
+    }
+    return msg
+}
+
+class Event {
+    func init(self, tenant: str, amount: int, note: str) {
+        self.tenant: str = tenant
+        self.amount: int = amount
+        self.note: str = note
+    }
+
+    func fields(self) -> dict[str, any] {
+        return {"tenant": self.tenant, "amount": self.amount, "note": self.note}
+    }
+}
+
+class EventLog {
+    func init(self) {
+        self.records: list[str] = []
+        self.sizes: list[int] = []
+    }
+
+    func append(self, wire: str) -> int {
+        self.records.append(wire)
+        self.sizes.append(len(bytes(wire)))
+        return len(self.records) - 1
+    }
+
+    func decode(self, index: int) -> Result[dict[str, any]] {
+        target: any = emptyStruct()
+        _ = Pb.unmarshal(self.records[index], target)?
+        return Result.Ok(fromStruct(target))
+    }
+
+    func replay(self) -> Result[list[Event]] {
+        events: list[Event] = []
+        for i in range(len(self.records)) {
+            fields: dict[str, any] = self.decode(i)?
+            events.append(Event(str(fields["tenant"]), int(fields["amount"] as float), str(fields["note"])))
+        }
+        return Result.Ok(events)
+    }
+}
+
+async func encodeTask(event: Event) -> Result[str] {
+    msg: any = toStruct(event.fields())?
+    return Pb.marshal(msg)
+}
+
+async func cloneTask(msg: any, note: str) -> str {
+    copy: any = Pb.clone(msg)
+    go! {
+        copy.(*structpb.Struct).Fields["note"] = structpb.NewStringValue(note)
+    }
+    return str(fromStruct(copy)["note"])
+}
+
+func main() {
+    tenants: list[str] = ["acme", "globex", "initech", "umbrella"]
+    events: list[Event] = [Event(tenants[i % 4], i, f"Zoë 🦅 東京 #{i}") for i in range(40)]
+    pending = [encodeTask(e) for e in events]
+    log: EventLog = EventLog()
+    for task in pending {
+        wire: Result[str] = await task
+        _ = log.append(wire.unwrap())
+    }
+    print(f"encoded concurrently: {len(log.records)} records")
+    expected: int = 0
+    for e in events {
+        expected += Pb.size(toStruct(e.fields()).unwrap())
+    }
+    print(f"sizes add up: {log.sizes.reduce(lambda a, b: a + b, 0) == expected}")
+
+    do {
+        replayed: list[Event] = log.replay()?
+        print(f"replay: {len(replayed)} events, tenants=[{' '.join(sorted(set([e.tenant for e in replayed])))}]")
+        acme: list[Event] = [e for e in replayed if e.tenant == "acme"]
+        print(f"filtered: {len(acme)} acme events, amounts={[e.amount for e in acme]}")
+        print(f"non-ASCII payload survives: {replayed[3].note[:8]} ({len(replayed[3].note)} characters, {len(bytes(replayed[3].note))} bytes)")
+    } catch err {
+        print(f"replay failed: {err}")
+    }
+
+    agree: int = 0
+    for i in range(len(log.records)) {
+        original: any = emptyStruct()
+        fromJson: any = emptyStruct()
+        fromText: any = emptyStruct()
+        _ = Pb.unmarshal(log.records[i], original).unwrap()
+        if Pb.fromJson(Pb.toJson(original), fromJson) and Pb.fromText(Pb.toText(original), fromText) and Pb.equal(original, fromJson) and Pb.equal(fromJson, fromText) {
+            agree++
+        }
+    }
+    print(f"json and text agree: {agree}/{len(log.records)}")
+
+    base: any = toStruct({"note": "base"}).unwrap()
+    clones = [cloneTask(base, f"clone-{i}") for i in range(16)]
+    notes: list[str] = []
+    for task in clones {
+        notes.append(await task)
+    }
+    print(f"clones in tasks are independent: {len(set(notes)) == 16 and str(fromStruct(base)['note']) == 'base'}")
+
+    saved: str = log.records[7]
+    log.records[7] = "\xff\xff\xff"
+    do {
+        _ = log.replay()?
+        print("corrupted record: accepted")
+    } catch err {
+        bad: list[int] = [i for i in range(len(log.records)) if not log.decode(i).ok()]
+        print(f"corrupted record: {err.kind} at {bad}")
+    }
+    log.records[7] = saved
+    print(f"replay after repair: {len(log.replay().unwrap())}")
+    print("ok")
+}
